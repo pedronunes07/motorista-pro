@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#155eef" />
+    <title>Motorista Pro</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; min-height: 100vh; background: #f7f8fc; color: #172033; font-family: Inter, Arial, sans-serif; }
+      main { max-width: 1040px; margin: auto; padding: 42px 24px 72px; }
+      header { display:flex; justify-content:space-between; align-items:center; margin-bottom: 54px; }
+      .brand { font-weight: 800; color: #155eef; font-size: 1.35rem; }
+      .tag { background:#eaf0ff; color:#155eef; padding:8px 13px; border-radius:100px; font-size:.8rem; font-weight:700; }
+      .hero { display:grid; grid-template-columns:1fr 1fr; gap:44px; align-items:center; }
+      h1 { font-size: clamp(2.5rem, 6vw, 4.5rem); line-height:1.03; margin:0 0 20px; letter-spacing:-.06em; }
+      h1 span { color:#155eef; }
+      p { font-size:1.1rem; color:#536079; line-height:1.6; }
+      .actions { display:flex; gap:12px; flex-wrap:wrap; margin-top:28px; }
+      a { text-decoration:none; }
+      .button { padding:13px 18px; border-radius:12px; font-weight:700; }
+      .primary { background:#155eef; color:#fff; }
+      .secondary { border:1px solid #d7ddeb; color:#25304a; background:white; }
+      .dashboard { background:#155eef; padding:22px; border-radius:28px; color:white; box-shadow:0 24px 55px #155eef48; }
+      .dashboard small { color:#c7d7ff; } .amount { font-size:2.25rem; font-weight:800; margin:8px 0 24px; }
+      .stats { display:grid; grid-template-columns:1fr 1fr; gap:12px; } .stat { background:#ffffff1c; border-radius:15px; padding:15px; }
+      .stat strong { display:block; margin-top:6px; font-size:1.1rem; }
+      .goal { background:white; color:#172033; border-radius:17px; padding:16px; margin-top:14px; }
+      .bar { height:9px; border-radius:9px; background:#e4e9f3; overflow:hidden; margin:10px 0 5px; }.bar i { display:block; width:80%; height:100%; background:#18a06d; border-radius:9px; }
+      .features { display:grid; grid-template-columns:repeat(3,1fr); gap:16px; margin-top:78px; }.feature { background:#fff; border:1px solid #edf0f6; padding:22px; border-radius:18px; }.icon { font-size:1.6rem; }.feature h2 { font-size:1.05rem; margin:12px 0 5px; }.feature p { font-size:.92rem; margin:0; }
+      footer { margin-top:64px; color:#8290aa; font-size:.85rem; }
+      @media (max-width:720px) { .hero{grid-template-columns:1fr;gap:32px}.features{grid-template-columns:1fr}.dashboard{order:-1} header{margin-bottom:35px} }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header><div class="brand">🚗 Motorista Pro</div><div class="tag">Gestão inteligente</div></header>
+      <section class="hero">
+        <div>
+          <h1>Mais controle.<br><span>Mais lucro.</span></h1>
+          <p>O parceiro financeiro de quem trabalha dirigindo. Registre corridas, custos, combustível e alcance suas metas todos os dias.</p>
+          <div class="actions"><a class="button primary" href="#recursos">Conhecer recursos</a><a class="button secondary" href="https://github.com/pedronunes07/motorista-pro">Ver código</a></div>
+        </div>
+        <div class="dashboard"><small>Lucro líquido hoje</small><div class="amount">R$ 140,10</div><div class="stats"><div class="stat"><small>Ganhos</small><strong>R$ 278,70</strong></div><div class="stat"><small>Gastos</small><strong>R$ 138,60</strong></div></div><div class="goal"><strong>Meta diária</strong><div class="bar"><i></i></div><small>R$ 278,70 de R$ 350,00 · 80%</small></div></div>
+      </section>
+      <section class="features" id="recursos"><article class="feature"><div class="icon">💰</div><h2>Finanças simples</h2><p>Ganhos e despesas organizados por categoria.</p></article><article class="feature"><div class="icon">⛽</div><h2>Seu veículo</h2><p>Combustível, consumo, manutenção e documentos.</p></article><article class="feature"><div class="icon">✨</div><h2>Assistente IA</h2><p>Orientações para suas metas e decisões de trabalho.</p></article></section>
+      <footer>Motorista Pro · Feito para motoristas de aplicativo</footer>
+    </main>
+  </body>
+</html>
