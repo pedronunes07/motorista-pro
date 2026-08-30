@@ -1,8 +1,12 @@
+import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
+import 'services/ride_notification_service.dart';
 
 void main() => runApp(const MotoristaProApp());
 
@@ -66,7 +70,7 @@ class AppData extends ChangeNotifier {
   double get income => entries.where((e) => e.isIncome).fold(0, (sum, e) => sum + e.value);
   double get expense => entries.where((e) => !e.isIncome).fold(0, (sum, e) => sum + e.value);
   double get balance => income - expense;
-  double get goalProgress => (income / dailyGoal).clamp(0, 1);
+  double get goalProgress => dailyGoal > 0 ? (income / dailyGoal).clamp(0, 1) : 0;
 
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
@@ -74,6 +78,11 @@ class AppData extends ChangeNotifier {
     weeklyGoal = prefs.getDouble('weeklyGoal') ?? weeklyGoal;
     monthlyGoal = prefs.getDouble('monthlyGoal') ?? monthlyGoal;
     odometer = prefs.getDouble('odometer') ?? odometer;
+    fuelLiters = prefs.getDouble('fuelLiters') ?? fuelLiters;
+    fuelCost = prefs.getDouble('fuelCost') ?? fuelCost;
+    reminders
+      ..clear()
+      ..addAll(prefs.getStringList('reminders') ?? ['Troca de óleo em 1.250 km', 'Licenciamento em dezembro']);
     final rawEntries = prefs.getString('entries');
     if (rawEntries != null) {
       final saved = jsonDecode(rawEntries) as List<dynamic>;
@@ -93,6 +102,9 @@ class AppData extends ChangeNotifier {
     await prefs.setDouble('weeklyGoal', weeklyGoal);
     await prefs.setDouble('monthlyGoal', monthlyGoal);
     await prefs.setDouble('odometer', odometer);
+    await prefs.setDouble('fuelLiters', fuelLiters);
+    await prefs.setDouble('fuelCost', fuelCost);
+    await prefs.setStringList('reminders', reminders);
     await prefs.setString('entries', jsonEncode(entries.map((e) => {'title': e.title, 'category': e.category, 'value': e.value, 'income': e.isIncome, 'date': e.date.toIso8601String()}).toList()));
   }
 
@@ -106,6 +118,20 @@ class AppData extends ChangeNotifier {
     dailyGoal = daily;
     weeklyGoal = weekly;
     monthlyGoal = monthly;
+    _save();
+    notifyListeners();
+  }
+
+  void addReminder(String reminder) {
+    final normalized = reminder.trim();
+    if (normalized.isEmpty) return;
+    reminders.add(normalized);
+    _save();
+    notifyListeners();
+  }
+
+  void removeReminder(String reminder) {
+    reminders.remove(reminder);
     _save();
     notifyListeners();
   }
@@ -126,6 +152,8 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final data = AppData();
+  final rideNotifications = RideNotificationService();
+  StreamSubscription<RideOffer>? rideSubscription;
   int index = 0;
   late final List<Widget> pages;
 
@@ -133,9 +161,49 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     data.load();
+    if (_supportsRideDetection) {
+      rideNotifications.start();
+      rideSubscription = rideNotifications.offers.listen(_showRideOffer);
+    }
     pages = [Dashboard(data: data), TransactionsPage(data: data), GoalsPage(data: data), VehiclePage(data: data), AssistantPage(data: data)];
   }
 
+  bool get _supportsRideDetection => !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+  Future<void> _showRideOffer(RideOffer offer) async {
+    if (!mounted) return;
+    final shouldRegister = await showDialog<bool>(
+      context: context,
+      builder: (_) => RideOfferDialog(offer: offer),
+    );
+    if (shouldRegister == true) {
+      data.add(TransactionEntry(
+        title: '${offer.platform} · ${offer.distanceKm.toStringAsFixed(1)} km',
+        category: 'Ganhos',
+        value: offer.fare,
+        isIncome: true,
+        date: DateTime.now(),
+      ));
+    }
+  }
+
+  Future<void> _requestRideAccess() async {
+    final granted = await rideNotifications.requestPermission();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(granted
+          ? 'Leitura de corridas ativada.'
+          : 'Ative o acesso às notificações para calcular corridas automaticamente.'),
+    ));
+  }
+
+  @override
+  void dispose() {
+    rideSubscription?.cancel();
+    rideNotifications.dispose();
+    data.dispose();
+    super.dispose();
+  }
   @override
   Widget build(BuildContext context) {
     const titles = ['Visão geral', 'Movimentações', 'Metas', 'Veículo', 'Assistente IA'];
@@ -143,6 +211,7 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: Text(titles[index], style: const TextStyle(fontWeight: FontWeight.w700)),
         actions: [
+          IconButton(onPressed: _requestRideAccess, icon: const Icon(Icons.radar), tooltip: 'Ativar leitura de corridas'),
           IconButton(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ReportsPage(data: data))), icon: const Icon(Icons.bar_chart_outlined), tooltip: 'Relatórios'),
           IconButton(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => RemindersPage(data: data))), icon: const Icon(Icons.notifications_none_outlined), tooltip: 'Lembretes'),
         ],
@@ -231,7 +300,7 @@ class _AddEntrySheetState extends State<AddEntrySheet> {
           TextField(controller: name, decoration: const InputDecoration(labelText: 'Descrição', hintText: 'Ex.: Uber ou Combustível')),
           TextField(controller: value, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Valor (R\$)')),
           const SizedBox(height: 20),
-          SizedBox(width: double.infinity, child: FilledButton(onPressed: () { final amount = double.tryParse(value.text.replaceAll(',', '.')); if (name.text.isNotEmpty && amount != null) { widget.data.add(TransactionEntry(title: name.text, category: income ? 'Ganhos' : 'Despesa', value: amount, isIncome: income, date: DateTime.now())); Navigator.pop(context); } }, child: const Text('Salvar lançamento'))),
+          SizedBox(width: double.infinity, child: FilledButton(onPressed: () { final amount = double.tryParse(value.text.replaceAll(',', '.')); if (name.text.trim().isNotEmpty && amount != null && amount > 0) { widget.data.add(TransactionEntry(title: name.text.trim(), category: income ? 'Ganhos' : 'Despesa', value: amount, isIncome: income, date: DateTime.now())); Navigator.pop(context); } }, child: const Text('Salvar lançamento'))),
         ]),
       );
 }
@@ -252,14 +321,14 @@ class GoalsPage extends StatelessWidget {
 }
 
 class GoalsSheet extends StatefulWidget { const GoalsSheet({super.key, required this.data}); final AppData data; @override State<GoalsSheet> createState() => _GoalsSheetState(); }
-class _GoalsSheetState extends State<GoalsSheet> { late final TextEditingController daily; late final TextEditingController weekly; late final TextEditingController monthly; @override void initState(){super.initState();daily=TextEditingController(text:widget.data.dailyGoal.toStringAsFixed(0));weekly=TextEditingController(text:widget.data.weeklyGoal.toStringAsFixed(0));monthly=TextEditingController(text:widget.data.monthlyGoal.toStringAsFixed(0));} @override void dispose() { daily.dispose(); weekly.dispose(); monthly.dispose(); super.dispose(); } @override Widget build(BuildContext context) => Padding(padding: EdgeInsets.fromLTRB(24, 24, 24, 24 + MediaQuery.of(context).viewInsets.bottom), child: Column(mainAxisSize: MainAxisSize.min, children: [Text('Editar metas', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)), TextField(controller: daily, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Meta diária')), TextField(controller: weekly, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Meta semanal')), TextField(controller: monthly, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Meta mensal')), const SizedBox(height: 20), SizedBox(width: double.infinity, child: FilledButton(onPressed: () { final d = double.tryParse(daily.text); final w = double.tryParse(weekly.text); final m = double.tryParse(monthly.text); if (d != null && w != null && m != null) { widget.data.updateGoals(daily: d, weekly: w, monthly: m); Navigator.pop(context); } }, child: const Text('Salvar metas')))])); }
+class _GoalsSheetState extends State<GoalsSheet> { late final TextEditingController daily; late final TextEditingController weekly; late final TextEditingController monthly; @override void initState(){super.initState();daily=TextEditingController(text:widget.data.dailyGoal.toStringAsFixed(0));weekly=TextEditingController(text:widget.data.weeklyGoal.toStringAsFixed(0));monthly=TextEditingController(text:widget.data.monthlyGoal.toStringAsFixed(0));} @override void dispose() { daily.dispose(); weekly.dispose(); monthly.dispose(); super.dispose(); } @override Widget build(BuildContext context) => Padding(padding: EdgeInsets.fromLTRB(24, 24, 24, 24 + MediaQuery.of(context).viewInsets.bottom), child: Column(mainAxisSize: MainAxisSize.min, children: [Text('Editar metas', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)), TextField(controller: daily, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Meta diária')), TextField(controller: weekly, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Meta semanal')), TextField(controller: monthly, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Meta mensal')), const SizedBox(height: 20), SizedBox(width: double.infinity, child: FilledButton(onPressed: () { final d = double.tryParse(daily.text); final w = double.tryParse(weekly.text); final m = double.tryParse(monthly.text); if (d != null && d > 0 && w != null && w > 0 && m != null && m > 0) { widget.data.updateGoals(daily: d, weekly: w, monthly: m); Navigator.pop(context); } }, child: const Text('Salvar metas')))])); }
 
 class VehiclePage extends StatelessWidget {
   const VehiclePage({super.key, required this.data});
   final AppData data;
   @override
   Widget build(BuildContext context) => AnimatedBuilder(animation: data, builder: (context, _) => ListView(padding: const EdgeInsets.all(20), children: [
-    Card(child: Padding(padding: const EdgeInsets.all(20), child: Row(children: [const CircleAvatar(radius: 28, child: Icon(Icons.directions_car, size: 30)), const SizedBox(width: 16), Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Chevrolet Onix 2022', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)), const Text('Flex · 52.480 km')])]))),
+    Card(child: Padding(padding: const EdgeInsets.all(20), child: Row(children: [const CircleAvatar(radius: 28, child: Icon(Icons.directions_car, size: 30)), const SizedBox(width: 16), Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Chevrolet Onix 2022', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)), Text('Flex · ${data.odometer.toStringAsFixed(0)} km')])]))),
     const SizedBox(height: 16),
     _InfoCard(icon: Icons.local_gas_station_outlined, title: 'Combustível', subtitle: 'Último abastecimento: ${_currency(data.fuelCost)} · ${data.fuelLiters.toStringAsFixed(1)} L'),
     _InfoCard(icon: Icons.build_outlined, title: 'Próxima troca de óleo', subtitle: 'Em 1.250 km ou 18 set.'),
@@ -270,7 +339,7 @@ class VehiclePage extends StatelessWidget {
 }
 
 class FuelSheet extends StatefulWidget { const FuelSheet({super.key, required this.data}); final AppData data; @override State<FuelSheet> createState() => _FuelSheetState(); }
-class _FuelSheetState extends State<FuelSheet> { final liters = TextEditingController(); final cost = TextEditingController(); final km = TextEditingController(); @override void dispose(){liters.dispose();cost.dispose();km.dispose();super.dispose();} @override Widget build(BuildContext context) => Padding(padding: EdgeInsets.fromLTRB(24,24,24,24 + MediaQuery.of(context).viewInsets.bottom), child: Column(mainAxisSize: MainAxisSize.min, children:[Text('Registrar abastecimento',style:Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight:FontWeight.bold)),TextField(controller:liters,keyboardType:const TextInputType.numberWithOptions(decimal:true),decoration:const InputDecoration(labelText:'Litros')),TextField(controller:cost,keyboardType:const TextInputType.numberWithOptions(decimal:true),decoration:const InputDecoration(labelText:'Valor pago')),TextField(controller:km,keyboardType:const TextInputType.numberWithOptions(decimal:true),decoration:const InputDecoration(labelText:'Quilometragem atual')),const SizedBox(height:20),SizedBox(width:double.infinity,child:FilledButton(onPressed:(){final l=double.tryParse(liters.text.replaceAll(',','.'));final c=double.tryParse(cost.text.replaceAll(',','.'));final k=double.tryParse(km.text.replaceAll(',','.'));if(l!=null&&c!=null&&k!=null){widget.data.addFuel(liters:l,cost:c,kilometers:k);Navigator.pop(context);}},child:const Text('Salvar abastecimento')))])); }
+class _FuelSheetState extends State<FuelSheet> { final liters = TextEditingController(); final cost = TextEditingController(); final km = TextEditingController(); @override void dispose(){liters.dispose();cost.dispose();km.dispose();super.dispose();} @override Widget build(BuildContext context) => Padding(padding: EdgeInsets.fromLTRB(24,24,24,24 + MediaQuery.of(context).viewInsets.bottom), child: Column(mainAxisSize: MainAxisSize.min, children:[Text('Registrar abastecimento',style:Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight:FontWeight.bold)),TextField(controller:liters,keyboardType:const TextInputType.numberWithOptions(decimal:true),decoration:const InputDecoration(labelText:'Litros')),TextField(controller:cost,keyboardType:const TextInputType.numberWithOptions(decimal:true),decoration:const InputDecoration(labelText:'Valor pago')),TextField(controller:km,keyboardType:const TextInputType.numberWithOptions(decimal:true),decoration:const InputDecoration(labelText:'Quilometragem atual')),const SizedBox(height:20),SizedBox(width:double.infinity,child:FilledButton(onPressed:(){final l=double.tryParse(liters.text.replaceAll(',','.'));final c=double.tryParse(cost.text.replaceAll(',','.'));final k=double.tryParse(km.text.replaceAll(',','.'));if(l!=null&&l>0&&c!=null&&c>0&&k!=null&&k>=widget.data.odometer){widget.data.addFuel(liters:l,cost:c,kilometers:k);Navigator.pop(context);}},child:const Text('Salvar abastecimento')))])); }
 
 class AssistantPage extends StatefulWidget {
   const AssistantPage({super.key, required this.data});
@@ -282,8 +351,6 @@ class _AssistantPageState extends State<AssistantPage> {
   String? answer;
   @override void dispose() { question.dispose(); super.dispose(); }
   void respond([String? prompt]) { final q = (prompt ?? question.text).toLowerCase(); setState(() { if (q.contains('meta')) { answer = 'Faltam ${_currency((widget.data.dailyGoal - widget.data.income).clamp(0, double.infinity).toDouble())} para sua meta diária.'; } else if (q.contains('combust') || q.contains('gasto')) { answer = 'Hoje seus gastos são ${_currency(widget.data.expense)}. O combustível registrado foi ${_currency(widget.data.fuelCost)}.'; } else { answer = 'Seu lucro líquido é ${_currency(widget.data.balance)}. Mantenha os lançamentos atualizados para recomendações mais precisas.'; } }); }
-  @override
-  Widget build(BuildContext context) => Padding(
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.all(20),
@@ -304,9 +371,42 @@ class _AssistantPageState extends State<AssistantPage> {
   );
 }
 
+class RideOfferDialog extends StatelessWidget {
+  const RideOfferDialog({super.key, required this.offer});
+  final RideOffer offer;
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: Text('Nova corrida · ${offer.platform}'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(_currency(offer.fare), style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
+          _RideMetric(label: 'Distância', value: '${offer.distanceKm.toStringAsFixed(1)} km'),
+          _RideMetric(label: 'Duração', value: '${offer.durationMinutes} min'),
+          _RideMetric(label: 'Ganho por km', value: _currency(offer.earningsPerKm)),
+          _RideMetric(label: 'Ganho por hora', value: _currency(offer.earningsPerHour)),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Descartar')),
+          FilledButton(onPressed: () => Navigator.pop(context, true), child: const Text('Registrar corrida')),
+        ],
+      );
+}
+
+class _RideMetric extends StatelessWidget {
+  const _RideMetric({required this.label, required this.value});
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 4),
+        child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [Text(label), Text(value, style: const TextStyle(fontWeight: FontWeight.bold))]),
+      );
+}
 class ReportsPage extends StatelessWidget { const ReportsPage({super.key, required this.data}); final AppData data; @override Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text('Relatórios')), body: AnimatedBuilder(animation:data,builder:(context,_)=>ListView(padding:const EdgeInsets.all(20),children:[Text('Resumo financeiro',style:Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight:FontWeight.bold)),const SizedBox(height:16),_InfoCard(icon:Icons.account_balance_wallet_outlined,title:'Receitas',subtitle:_currency(data.income)),_InfoCard(icon:Icons.money_off_outlined,title:'Despesas',subtitle:_currency(data.expense)),_InfoCard(icon:Icons.savings_outlined,title:'Lucro líquido',subtitle:_currency(data.balance)),_InfoCard(icon:Icons.local_gas_station_outlined,title:'Custo por combustível',subtitle:_currency(data.fuelCost)),const SizedBox(height:12),FilledButton.icon(onPressed:()=>ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content:Text('Exportação PDF/CSV será conectada ao serviço de relatórios.'))),icon:const Icon(Icons.file_download_outlined),label:const Text('Exportar relatório'))]))); }
 class RemindersPage extends StatefulWidget { const RemindersPage({super.key,required this.data}); final AppData data; @override State<RemindersPage> createState()=>_RemindersPageState(); }
-class _RemindersPageState extends State<RemindersPage> { final controller=TextEditingController(); @override void dispose(){controller.dispose();super.dispose();} @override Widget build(BuildContext context)=>Scaffold(appBar:AppBar(title:const Text('Agenda e lembretes')),body:ListView(padding:const EdgeInsets.all(20),children:[...widget.data.reminders.map((r)=>Card(child:ListTile(leading:const Icon(Icons.notifications_active_outlined),title:Text(r),trailing:IconButton(icon:const Icon(Icons.check_circle_outline),onPressed:()=>setState(()=>widget.data.reminders.remove(r))))),const SizedBox(height:16),TextField(controller:controller,decoration:InputDecoration(labelText:'Novo lembrete',suffixIcon:IconButton(icon:const Icon(Icons.add),onPressed:(){if(controller.text.isNotEmpty){setState((){widget.data.reminders.add(controller.text);controller.clear();});}})))])); }
+class _RemindersPageState extends State<RemindersPage> { final controller=TextEditingController(); @override void dispose(){controller.dispose();super.dispose();} @override Widget build(BuildContext context)=>Scaffold(appBar:AppBar(title:const Text('Agenda e lembretes')),body:AnimatedBuilder(animation:widget.data,builder:(context,_)=>ListView(padding:const EdgeInsets.all(20),children:[...widget.data.reminders.map((r)=>Card(child:ListTile(leading:const Icon(Icons.notifications_active_outlined),title:Text(r),trailing:IconButton(icon:const Icon(Icons.check_circle_outline),tooltip:'Concluir lembrete',onPressed:()=>widget.data.removeReminder(r)))),const SizedBox(height:16),TextField(controller:controller,onSubmitted:(_)=>_add(),decoration:InputDecoration(labelText:'Novo lembrete',suffixIcon:IconButton(icon:const Icon(Icons.add),onPressed:_add)))]))); void _add(){widget.data.addReminder(controller.text);controller.clear();} }
 class _Suggestion extends StatelessWidget { const _Suggestion({required this.text, required this.onTap}); final String text; final VoidCallback onTap; @override Widget build(BuildContext context) => Padding(padding: const EdgeInsets.only(bottom: 10), child: OutlinedButton(onPressed: onTap, child: Align(alignment: Alignment.centerLeft, child: Text(text)))); }
 class _InfoCard extends StatelessWidget { const _InfoCard({required this.icon, required this.title, required this.subtitle}); final IconData icon; final String title, subtitle; @override Widget build(BuildContext context) => Card(child: ListTile(leading: Icon(icon, color: Theme.of(context).colorScheme.primary), title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600)), subtitle: Text(subtitle), trailing: const Icon(Icons.chevron_right))); }
 class _BalanceCard extends StatelessWidget { const _BalanceCard({required this.value}); final double value; @override Widget build(BuildContext context) => Container(padding: const EdgeInsets.all(24), decoration: BoxDecoration(color: Theme.of(context).colorScheme.primary, borderRadius: BorderRadius.circular(24)), child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [Text('Lucro líquido hoje', style: TextStyle(color: Theme.of(context).colorScheme.onPrimary.withValues(alpha: .8))), const SizedBox(height: 8), Text(_currency(value), style: Theme.of(context).textTheme.headlineMedium?.copyWith(color: Theme.of(context).colorScheme.onPrimary, fontWeight: FontWeight.bold))])); }
