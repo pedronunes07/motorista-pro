@@ -3,12 +3,19 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'services/ride_notification_service.dart';
 
 void main() => runApp(const MotoristaProApp());
+
+@pragma('vm:entry-point')
+void overlayMain() {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const MaterialApp(debugShowCheckedModeBanner: false, home: RideOverlayView()));
+}
 
 class MotoristaProApp extends StatelessWidget {
   const MotoristaProApp({super.key});
@@ -61,6 +68,8 @@ class AppData extends ChangeNotifier {
   double fuelLiters = 0;
   double fuelCost = 0;
   final List<String> reminders = [];
+  double calculatorYellowPerKm = 1.50;
+  double calculatorGreenPerKm = 2.00;
 
   double get income => entries.where((e) => e.isIncome).fold(0, (sum, e) => sum + e.value);
   double get expense => entries.where((e) => !e.isIncome).fold(0, (sum, e) => sum + e.value);
@@ -75,6 +84,8 @@ class AppData extends ChangeNotifier {
     odometer = prefs.getDouble('odometer') ?? odometer;
     fuelLiters = prefs.getDouble('fuelLiters') ?? fuelLiters;
     fuelCost = prefs.getDouble('fuelCost') ?? fuelCost;
+    calculatorYellowPerKm = prefs.getDouble('calculatorYellowPerKm') ?? calculatorYellowPerKm;
+    calculatorGreenPerKm = prefs.getDouble('calculatorGreenPerKm') ?? calculatorGreenPerKm;
     reminders
       ..clear()
       ..addAll(prefs.getStringList('reminders') ?? ['Troca de óleo em 1.250 km', 'Licenciamento em dezembro']);
@@ -99,6 +110,8 @@ class AppData extends ChangeNotifier {
     await prefs.setDouble('odometer', odometer);
     await prefs.setDouble('fuelLiters', fuelLiters);
     await prefs.setDouble('fuelCost', fuelCost);
+    await prefs.setDouble('calculatorYellowPerKm', calculatorYellowPerKm);
+    await prefs.setDouble('calculatorGreenPerKm', calculatorGreenPerKm);
     await prefs.setStringList('reminders', reminders);
     await prefs.setString('entries', jsonEncode(entries.map((e) => {'title': e.title, 'category': e.category, 'value': e.value, 'income': e.isIncome, 'date': e.date.toIso8601String()}).toList()));
   }
@@ -113,6 +126,13 @@ class AppData extends ChangeNotifier {
     dailyGoal = daily;
     weeklyGoal = weekly;
     monthlyGoal = monthly;
+    _save();
+    notifyListeners();
+  }
+
+  void updateCalculator({required double yellowPerKm, required double greenPerKm}) {
+    calculatorYellowPerKm = yellowPerKm;
+    calculatorGreenPerKm = greenPerKm;
     _save();
     notifyListeners();
   }
@@ -167,6 +187,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _showRideOffer(RideOffer offer) async {
     if (!mounted) return;
+    await _showRideOverlay(offer);
     final shouldRegister = await showDialog<bool>(
       context: context,
       builder: (_) => RideOfferDialog(offer: offer),
@@ -182,6 +203,30 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _showRideOverlay(RideOffer offer) async {
+    if (!_supportsRideDetection || !await FlutterOverlayWindow.isPermissionGranted()) return;
+    await FlutterOverlayWindow.closeOverlay();
+    await FlutterOverlayWindow.showOverlay(
+      height: 245,
+      alignment: OverlayAlignment.topCenter,
+      enableDrag: true,
+      flag: OverlayFlag.defaultFlag,
+      overlayTitle: 'Motorista Pro analisando corrida',
+      overlayContent: '${offer.platform}: ${_currency(offer.fare)}',
+    );
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    await FlutterOverlayWindow.shareData(jsonEncode({
+      'platform': offer.platform,
+      'fare': offer.fare,
+      'distance': offer.distanceKm,
+      'minutes': offer.durationMinutes,
+      'perKm': offer.earningsPerKm,
+      'perHour': offer.earningsPerHour,
+      'yellow': data.calculatorYellowPerKm,
+      'green': data.calculatorGreenPerKm,
+    }));
+  }
+
   Future<void> _requestRideAccess() async {
     final granted = await rideNotifications.requestPermission();
     if (!mounted) return;
@@ -190,6 +235,10 @@ class _HomeScreenState extends State<HomeScreen> {
           ? 'Leitura de corridas ativada.'
           : 'Ative o acesso às notificações para calcular corridas automaticamente.'),
     ));
+  }
+
+  Future<void> _openCalculatorSettings() async {
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => CalculatorSettingsPage(data: data, notifications: rideNotifications)));
   }
 
   @override
@@ -206,6 +255,7 @@ class _HomeScreenState extends State<HomeScreen> {
       appBar: AppBar(
         title: Text(titles[index], style: const TextStyle(fontWeight: FontWeight.w700)),
         actions: [
+          IconButton(onPressed: _openCalculatorSettings, icon: const Icon(Icons.tune), tooltip: 'Configurar calculadora flutuante'),
           IconButton(onPressed: _requestRideAccess, icon: const Icon(Icons.radar), tooltip: 'Ativar leitura de corridas'),
           IconButton(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ReportsPage(data: data))), icon: const Icon(Icons.bar_chart_outlined), tooltip: 'Relatórios'),
           IconButton(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => RemindersPage(data: data))), icon: const Icon(Icons.notifications_none_outlined), tooltip: 'Lembretes'),
@@ -364,6 +414,158 @@ class _AssistantPageState extends State<AssistantPage> {
       TextField(controller: question, onSubmitted: (_) => respond(), decoration: InputDecoration(hintText: 'Pergunte ao assistente...', suffixIcon: IconButton(onPressed: respond, icon: const Icon(Icons.send)), border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(16)))),),
     ],
   ));
+}
+
+class CalculatorSettingsPage extends StatefulWidget {
+  const CalculatorSettingsPage({super.key, required this.data, required this.notifications});
+  final AppData data;
+  final RideNotificationService notifications;
+
+  @override
+  State<CalculatorSettingsPage> createState() => _CalculatorSettingsPageState();
+}
+
+class _CalculatorSettingsPageState extends State<CalculatorSettingsPage> {
+  late final TextEditingController yellow;
+  late final TextEditingController green;
+  bool notificationAccess = false;
+  bool overlayAccess = false;
+
+  @override
+  void initState() {
+    super.initState();
+    yellow = TextEditingController(text: widget.data.calculatorYellowPerKm.toStringAsFixed(2).replaceAll('.', ','));
+    green = TextEditingController(text: widget.data.calculatorGreenPerKm.toStringAsFixed(2).replaceAll('.', ','));
+    _refreshPermissions();
+  }
+
+  Future<void> _refreshPermissions() async {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    final notifications = await widget.notifications.hasPermission();
+    final overlay = await FlutterOverlayWindow.isPermissionGranted();
+    if (mounted) setState(() { notificationAccess = notifications; overlayAccess = overlay; });
+  }
+
+  double? _number(String value) => double.tryParse(value.trim().replaceAll(',', '.'));
+
+  void _save() {
+    final yellowValue = _number(yellow.text);
+    final greenValue = _number(green.text);
+    if (yellowValue == null || yellowValue <= 0 || greenValue == null || greenValue <= yellowValue) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Informe valores válidos. A meta verde precisa ser maior que a amarela.')));
+      return;
+    }
+    widget.data.updateCalculator(yellowPerKm: yellowValue, greenPerKm: greenValue);
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Configuração da calculadora salva.')));
+  }
+
+  Future<void> _requestNotifications() async {
+    await widget.notifications.requestPermission();
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    await _refreshPermissions();
+  }
+
+  Future<void> _requestOverlay() async {
+    await FlutterOverlayWindow.requestPermission();
+    await Future<void>.delayed(const Duration(milliseconds: 400));
+    await _refreshPermissions();
+  }
+
+  Future<void> _preview() async {
+    _save();
+    if (!await FlutterOverlayWindow.isPermissionGranted()) {
+      await _requestOverlay();
+      return;
+    }
+    await FlutterOverlayWindow.closeOverlay();
+    await FlutterOverlayWindow.showOverlay(height: 245, alignment: OverlayAlignment.topCenter, enableDrag: true, flag: OverlayFlag.defaultFlag, overlayTitle: 'Teste Motorista Pro', overlayContent: 'Prévia da calculadora flutuante');
+    await Future<void>.delayed(const Duration(milliseconds: 500));
+    await FlutterOverlayWindow.shareData(jsonEncode({'platform':'Teste 99/Uber','fare':24.50,'distance':8.2,'minutes':18,'perKm':2.99,'perHour':81.67,'yellow':widget.data.calculatorYellowPerKm,'green':widget.data.calculatorGreenPerKm}));
+  }
+
+  @override
+  void dispose() { yellow.dispose(); green.dispose(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(title: const Text('Calculadora flutuante')),
+    body: ListView(padding: const EdgeInsets.all(20), children: [
+      Text('Configure a análise da corrida', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
+      const SizedBox(height: 8),
+      const Text('Quando uma oferta da 99, Uber ou inDrive chegar, o cartão aparecerá sobre o aplicativo mostrando valor, distância, tempo, ganho por km e ganho por hora.'),
+      const SizedBox(height: 20),
+      Card(color: Colors.red.shade50, child: const ListTile(leading: CircleAvatar(backgroundColor: Colors.red, child: Icon(Icons.close, color: Colors.white)), title: Text('Vermelho'), subtitle: Text('Abaixo do início da faixa amarela'))),
+      Card(color: Colors.amber.shade50, child: const ListTile(leading: CircleAvatar(backgroundColor: Colors.amber, child: Icon(Icons.remove, color: Colors.black)), title: Text('Amarelo'), subtitle: Text('Entre o mínimo aceitável e a meta ideal'))),
+      Card(color: Colors.green.shade50, child: const ListTile(leading: CircleAvatar(backgroundColor: Colors.green, child: Icon(Icons.check, color: Colors.white)), title: Text('Verde'), subtitle: Text('Igual ou acima da meta ideal'))),
+      const SizedBox(height: 12),
+      TextField(controller: yellow, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Faixa amarela começa em (R\$/km)', prefixIcon: Icon(Icons.warning_amber), border: OutlineInputBorder())),
+      const SizedBox(height: 14),
+      TextField(controller: green, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Meta verde começa em (R\$/km)', prefixIcon: Icon(Icons.flag), border: OutlineInputBorder())),
+      const SizedBox(height: 18),
+      _PermissionTile(title: 'Leitura das notificações', enabled: notificationAccess, onTap: _requestNotifications),
+      _PermissionTile(title: 'Aparecer sobre outros aplicativos', enabled: overlayAccess, onTap: _requestOverlay),
+      const SizedBox(height: 18),
+      FilledButton.icon(onPressed: _save, icon: const Icon(Icons.save), label: const Text('Salvar configuração')),
+      const SizedBox(height: 10),
+      OutlinedButton.icon(onPressed: _preview, icon: const Icon(Icons.preview), label: const Text('Testar cartão flutuante')),
+    ]),
+  );
+}
+
+class _PermissionTile extends StatelessWidget {
+  const _PermissionTile({required this.title, required this.enabled, required this.onTap});
+  final String title;
+  final bool enabled;
+  final VoidCallback onTap;
+  @override
+  Widget build(BuildContext context) => Card(child: ListTile(leading: Icon(enabled ? Icons.check_circle : Icons.error_outline, color: enabled ? Colors.green : Colors.orange), title: Text(title), subtitle: Text(enabled ? 'Autorizado' : 'Toque para autorizar'), trailing: const Icon(Icons.chevron_right), onTap: onTap));
+}
+
+class RideOverlayView extends StatefulWidget {
+  const RideOverlayView({super.key});
+  @override
+  State<RideOverlayView> createState() => _RideOverlayViewState();
+}
+
+class _RideOverlayViewState extends State<RideOverlayView> {
+  StreamSubscription<dynamic>? subscription;
+  Map<String, dynamic>? offer;
+
+  @override
+  void initState() {
+    super.initState();
+    subscription = FlutterOverlayWindow.overlayListener.listen((event) {
+      try {
+        final decoded = jsonDecode(event.toString()) as Map<String, dynamic>;
+        if (mounted) setState(() => offer = decoded);
+      } catch (_) {}
+    });
+  }
+
+  @override
+  void dispose() { subscription?.cancel(); super.dispose(); }
+
+  @override
+  Widget build(BuildContext context) {
+    final item = offer;
+    if (item == null) return const Material(color: Colors.transparent, child: Center(child: CircularProgressIndicator()));
+    final perKm = (item['perKm'] as num).toDouble();
+    final yellow = (item['yellow'] as num).toDouble();
+    final green = (item['green'] as num).toDouble();
+    final isGreen = perKm >= green;
+    final isYellow = perKm >= yellow && !isGreen;
+    final color = isGreen ? const Color(0xFF16803C) : isYellow ? const Color(0xFFF4B400) : const Color(0xFFC62828);
+    final status = isGreen ? 'ACIMA DA META' : isYellow ? 'FAIXA INTERMEDIÁRIA' : 'ABAIXO DA META';
+    return Material(color: Colors.transparent, child: SafeArea(child: Container(
+      margin: const EdgeInsets.all(8), padding: const EdgeInsets.fromLTRB(16, 12, 10, 12),
+      decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(18), boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 10)]),
+      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(children: [Expanded(child: Text('${item['platform']} · $status', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14))), IconButton(onPressed: FlutterOverlayWindow.closeOverlay, icon: const Icon(Icons.close, color: Colors.white), visualDensity: VisualDensity.compact)]),
+        Text(_currency((item['fare'] as num).toDouble()), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 28)),
+        Text('${(item['distance'] as num).toStringAsFixed(1)} km  •  ${item['minutes']} min  •  ${_currency(perKm)}/km  •  ${_currency((item['perHour'] as num).toDouble())}/h', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
+      ]),
+    )));
+  }
 }
 
 class RideOfferDialog extends StatelessWidget {
