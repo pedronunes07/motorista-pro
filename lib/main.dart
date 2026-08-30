@@ -53,19 +53,14 @@ class TransactionEntry {
 }
 
 class AppData extends ChangeNotifier {
-  final List<TransactionEntry> entries = [
-    TransactionEntry(title: 'Uber', category: 'Ganhos', value: 186.40, isIncome: true, date: DateTime.now()),
-    TransactionEntry(title: '99', category: 'Ganhos', value: 92.30, isIncome: true, date: DateTime.now()),
-    TransactionEntry(title: 'Combustível', category: 'Despesa', value: 120, isIncome: false, date: DateTime.now()),
-    TransactionEntry(title: 'Pedágio', category: 'Despesa', value: 18.60, isIncome: false, date: DateTime.now()),
-  ];
+  final List<TransactionEntry> entries = [];
   double dailyGoal = 350;
   double weeklyGoal = 2100;
   double monthlyGoal = 8500;
-  double odometer = 52480;
-  double fuelLiters = 32.4;
-  double fuelCost = 188.60;
-  final List<String> reminders = ['Troca de óleo em 1.250 km', 'Licenciamento em dezembro'];
+  double odometer = 0;
+  double fuelLiters = 0;
+  double fuelCost = 0;
+  final List<String> reminders = [];
 
   double get income => entries.where((e) => e.isIncome).fold(0, (sum, e) => sum + e.value);
   double get expense => entries.where((e) => !e.isIncome).fold(0, (sum, e) => sum + e.value);
@@ -368,7 +363,7 @@ class _AssistantPageState extends State<AssistantPage> {
       const Spacer(),
       TextField(controller: question, onSubmitted: (_) => respond(), decoration: InputDecoration(hintText: 'Pergunte ao assistente...', suffixIcon: IconButton(onPressed: respond, icon: const Icon(Icons.send)), border: const OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(16)))),),
     ],
-  );
+  ));
 }
 
 class RideOfferDialog extends StatelessWidget {
