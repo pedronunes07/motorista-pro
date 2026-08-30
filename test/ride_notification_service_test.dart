@@ -7,7 +7,7 @@ void main() {
       final offer = RideOfferParser.parse(
         packageName: 'com.ubercab.driver',
         title: 'Nova solicitação de corrida',
-        content: 'R$ 24,50 · 8,2 km · 18 min',
+        content: r'R$ 24,50 · 8,2 km · 18 min',
       );
 
       expect(offer, isNotNull);
