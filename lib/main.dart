@@ -17,6 +17,14 @@ void overlayMain() {
   runApp(const MaterialApp(debugShowCheckedModeBanner: false, home: RideOverlayView()));
 }
 
+Future<void> _shareOverlayReliably(Map<String, dynamic> data) async {
+  final payload = jsonEncode(data);
+  for (final delay in const [700, 1200, 1800]) {
+    await Future<void>.delayed(Duration(milliseconds: delay));
+    await FlutterOverlayWindow.shareData(payload);
+  }
+}
+
 class MotoristaProApp extends StatelessWidget {
   const MotoristaProApp({super.key});
 
@@ -207,15 +215,14 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!_supportsRideDetection || !await FlutterOverlayWindow.isPermissionGranted()) return;
     await FlutterOverlayWindow.closeOverlay();
     await FlutterOverlayWindow.showOverlay(
-      height: 245,
+      height: 360,
       alignment: OverlayAlignment.topCenter,
       enableDrag: true,
       flag: OverlayFlag.defaultFlag,
       overlayTitle: 'Motorista Pro analisando corrida',
       overlayContent: '${offer.platform}: ${_currency(offer.fare)}',
     );
-    await Future<void>.delayed(const Duration(milliseconds: 500));
-    await FlutterOverlayWindow.shareData(jsonEncode({
+    await _shareOverlayReliably({
       'platform': offer.platform,
       'fare': offer.fare,
       'distance': offer.distanceKm,
@@ -224,7 +231,7 @@ class _HomeScreenState extends State<HomeScreen> {
       'perHour': offer.earningsPerHour,
       'yellow': data.calculatorYellowPerKm,
       'green': data.calculatorGreenPerKm,
-    }));
+    });
   }
 
   Future<void> _requestRideAccess() async {
@@ -478,9 +485,8 @@ class _CalculatorSettingsPageState extends State<CalculatorSettingsPage> {
       return;
     }
     await FlutterOverlayWindow.closeOverlay();
-    await FlutterOverlayWindow.showOverlay(height: 245, alignment: OverlayAlignment.topCenter, enableDrag: true, flag: OverlayFlag.defaultFlag, overlayTitle: 'Teste Motorista Pro', overlayContent: 'Prévia da calculadora flutuante');
-    await Future<void>.delayed(const Duration(milliseconds: 500));
-    await FlutterOverlayWindow.shareData(jsonEncode({'platform':'Teste 99/Uber','fare':24.50,'distance':8.2,'minutes':18,'perKm':2.99,'perHour':81.67,'yellow':widget.data.calculatorYellowPerKm,'green':widget.data.calculatorGreenPerKm}));
+    await FlutterOverlayWindow.showOverlay(height: 360, alignment: OverlayAlignment.topCenter, enableDrag: true, flag: OverlayFlag.defaultFlag, overlayTitle: 'Teste Motorista Pro', overlayContent: 'Prévia da calculadora flutuante');
+    await _shareOverlayReliably({'platform':'Teste 99/Uber','fare':24.50,'distance':8.2,'minutes':18,'perKm':2.99,'perHour':81.67,'yellow':widget.data.calculatorYellowPerKm,'green':widget.data.calculatorGreenPerKm});
   }
 
   @override
@@ -529,7 +535,16 @@ class RideOverlayView extends StatefulWidget {
 
 class _RideOverlayViewState extends State<RideOverlayView> {
   StreamSubscription<dynamic>? subscription;
-  Map<String, dynamic>? offer;
+  Map<String, dynamic> offer = const {
+    'platform': 'Motorista Pro',
+    'fare': 24.50,
+    'distance': 8.2,
+    'minutes': 18,
+    'perKm': 2.99,
+    'perHour': 81.67,
+    'yellow': 1.50,
+    'green': 2.00,
+  };
 
   @override
   void initState() {
@@ -548,7 +563,6 @@ class _RideOverlayViewState extends State<RideOverlayView> {
   @override
   Widget build(BuildContext context) {
     final item = offer;
-    if (item == null) return const Material(color: Colors.transparent, child: Center(child: CircularProgressIndicator()));
     final perKm = (item['perKm'] as num).toDouble();
     final yellow = (item['yellow'] as num).toDouble();
     final green = (item['green'] as num).toDouble();
