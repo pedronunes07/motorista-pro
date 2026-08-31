@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -23,6 +24,12 @@ Future<void> _shareOverlayReliably(Map<String, dynamic> data) async {
     await Future<void>.delayed(Duration(milliseconds: delay));
     await FlutterOverlayWindow.shareData(payload);
   }
+}
+
+const _nativeOverlay = MethodChannel('motorista_pro/overlay');
+
+Future<void> _showNativeRideOverlay(Map<String, dynamic> data) async {
+  await _nativeOverlay.invokeMethod<void>('showRideOverlay', data);
 }
 
 class MotoristaProApp extends StatelessWidget {
@@ -213,16 +220,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _showRideOverlay(RideOffer offer) async {
     if (!_supportsRideDetection || !await FlutterOverlayWindow.isPermissionGranted()) return;
-    await FlutterOverlayWindow.closeOverlay();
-    await FlutterOverlayWindow.showOverlay(
-      height: 360,
-      alignment: OverlayAlignment.topCenter,
-      enableDrag: true,
-      flag: OverlayFlag.defaultFlag,
-      overlayTitle: 'Motorista Pro analisando corrida',
-      overlayContent: '${offer.platform}: ${_currency(offer.fare)}',
-    );
-    await _shareOverlayReliably({
+    await _showNativeRideOverlay({
       'platform': offer.platform,
       'fare': offer.fare,
       'distance': offer.distanceKm,
@@ -484,9 +482,11 @@ class _CalculatorSettingsPageState extends State<CalculatorSettingsPage> {
       await _requestOverlay();
       return;
     }
-    await FlutterOverlayWindow.closeOverlay();
-    await FlutterOverlayWindow.showOverlay(height: 360, alignment: OverlayAlignment.topCenter, enableDrag: true, flag: OverlayFlag.defaultFlag, overlayTitle: 'Teste Motorista Pro', overlayContent: 'Prévia da calculadora flutuante');
-    await _shareOverlayReliably({'platform':'Teste 99/Uber','fare':24.50,'distance':8.2,'minutes':18,'perKm':2.99,'perHour':81.67,'yellow':widget.data.calculatorYellowPerKm,'green':widget.data.calculatorGreenPerKm});
+    try {
+      await _showNativeRideOverlay({'platform':'Teste 99/Uber','fare':24.50,'distance':8.2,'minutes':18,'perKm':2.99,'perHour':81.67,'yellow':widget.data.calculatorYellowPerKm,'green':widget.data.calculatorGreenPerKm});
+    } on PlatformException catch (error) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Não foi possível abrir o cartão: ${error.message ?? error.code}')));
+    }
   }
 
   @override
