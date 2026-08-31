@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Motorista Pro</string>
+    <string name="ride_accessibility_description">Lê ofertas de corrida visíveis na 99 e Uber para calcular valor por km e por hora.</string>
+</resources>
