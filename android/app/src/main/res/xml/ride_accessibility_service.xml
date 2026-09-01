@@ -4,5 +4,6 @@
     android:accessibilityFeedbackType="feedbackGeneric"
     android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows|flagIncludeNotImportantViews"
     android:canRetrieveWindowContent="true"
+    android:canTakeScreenshot="true"
     android:description="@string/ride_accessibility_description"
     android:notificationTimeout="250" />
