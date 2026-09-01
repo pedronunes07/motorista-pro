@@ -1,5 +1,7 @@
 @file:Suppress("DEPRECATION")
 
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -10,7 +12,6 @@ android {
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
-    kotlinOptions { jvmTarget = JavaVersion.VERSION_17.toString() }
     defaultConfig {
         applicationId = "com.motoristapro.app"
         minSdk = 23
@@ -20,6 +21,7 @@ android {
     }
     buildTypes { release { signingConfig = signingConfigs.getByName("debug") } }
 }
+kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_17 } }
 flutter { source = "../.." }
 
 dependencies {
