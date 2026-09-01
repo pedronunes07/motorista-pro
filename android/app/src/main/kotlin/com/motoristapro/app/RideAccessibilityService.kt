@@ -1,15 +1,26 @@
 package com.motoristapro.app
 
 import android.accessibilityservice.AccessibilityService
+import android.graphics.Bitmap
+import android.os.Build
+import android.view.Display
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import com.google.mlkit.vision.common.InputImage
+import com.google.mlkit.vision.text.TextRecognition
+import com.google.mlkit.vision.text.latin.TextRecognizerOptions
 import java.util.Locale
+import java.util.concurrent.Executors
 
 class RideAccessibilityService : AccessibilityService() {
     companion object { @Volatile var isRunning = false }
 
     private var lastSignature = ""
     private var lastShownAt = 0L
+    private var lastScanAt = 0L
+    private var scanning = false
+    private val screenshotExecutor = Executors.newSingleThreadExecutor()
+    private val recognizer by lazy { TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS) }
 
     override fun onServiceConnected() { isRunning = true }
     override fun onUnbind(intent: android.content.Intent?): Boolean { isRunning = false; return super.onUnbind(intent) }
@@ -19,14 +30,43 @@ class RideAccessibilityService : AccessibilityService() {
         val packageName = event?.packageName?.toString()?.lowercase(Locale.ROOT) ?: return
         val platform = when {
             packageName.contains("uber") -> "Uber"
-            packageName.contains("taxis99") || packageName.contains("99") -> "99"
+            packageName.contains("taxis99") || packageName.contains("99") || packageName.contains("didi") -> "99"
             else -> return
         }
         val root = rootInActiveWindow ?: event.source ?: return
         val chunks = mutableListOf<String>()
         collectText(root, chunks)
         val text = chunks.distinct().joinToString(" | ")
-        val offer = ScreenOfferParser.parse(text) ?: return
+        val offer = ScreenOfferParser.parse(text)
+        if (offer == null) {
+            scanScreenshot(platform)
+            return
+        }
+        showOffer(platform, offer)
+    }
+
+    private fun scanScreenshot(platform: String) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R || scanning) return
+        val now = System.currentTimeMillis()
+        if (now - lastScanAt < 900) return
+        lastScanAt = now
+        scanning = true
+        takeScreenshot(Display.DEFAULT_DISPLAY, screenshotExecutor, object : TakeScreenshotCallback {
+            override fun onSuccess(result: ScreenshotResult) {
+                val bitmap = Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace)?.copy(Bitmap.Config.ARGB_8888, false)
+                result.hardwareBuffer.close()
+                if (bitmap == null) { scanning = false; return }
+                recognizer.process(InputImage.fromBitmap(bitmap, 0))
+                    .addOnSuccessListener { recognized ->
+                        ScreenOfferParser.parse(recognized.text)?.let { showOffer(platform, it) }
+                    }
+                    .addOnCompleteListener { bitmap.recycle(); scanning = false }
+            }
+            override fun onFailure(errorCode: Int) { scanning = false }
+        })
+    }
+
+    private fun showOffer(platform: String, offer: ScreenOffer) {
         val signature = "$platform:${offer.fare}:${offer.distance}:${offer.minutes}"
         val now = System.currentTimeMillis()
         if (signature == lastSignature && now - lastShownAt < 12000) return
@@ -43,6 +83,13 @@ class RideAccessibilityService : AccessibilityService() {
             "yellow" to preferences.getFloat("yellow", 1.5f).toDouble(),
             "green" to preferences.getFloat("green", 2.0f).toDouble()
         ))
+    }
+
+    override fun onDestroy() {
+        isRunning = false
+        recognizer.close()
+        screenshotExecutor.shutdownNow()
+        super.onDestroy()
     }
 
     private fun collectText(node: AccessibilityNodeInfo, out: MutableList<String>) {
