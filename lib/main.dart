@@ -430,25 +430,40 @@ class CalculatorSettingsPage extends StatefulWidget {
   State<CalculatorSettingsPage> createState() => _CalculatorSettingsPageState();
 }
 
-class _CalculatorSettingsPageState extends State<CalculatorSettingsPage> {
+class _CalculatorSettingsPageState extends State<CalculatorSettingsPage> with WidgetsBindingObserver {
   late final TextEditingController yellow;
   late final TextEditingController green;
   bool notificationAccess = false;
   bool overlayAccess = false;
+  bool accessibilityAccess = false;
+  bool setupFlowActive = false;
+  bool checkingSetup = false;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     yellow = TextEditingController(text: widget.data.calculatorYellowPerKm.toStringAsFixed(2).replaceAll('.', ','));
     green = TextEditingController(text: widget.data.calculatorGreenPerKm.toStringAsFixed(2).replaceAll('.', ','));
     _refreshPermissions();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      Future<void>.delayed(const Duration(milliseconds: 700), () async {
+        await _refreshPermissions();
+        if (setupFlowActive) await _continueAutomaticSetup();
+      });
+    }
   }
 
   Future<void> _refreshPermissions() async {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
     final notifications = await widget.notifications.hasPermission();
     final overlay = await FlutterOverlayWindow.isPermissionGranted();
-    if (mounted) setState(() { notificationAccess = notifications; overlayAccess = overlay; });
+    final accessibility = await _nativeOverlay.invokeMethod<bool>('isAccessibilityEnabled') ?? false;
+    if (mounted) setState(() { notificationAccess = notifications; overlayAccess = overlay; accessibilityAccess = accessibility; });
   }
 
   double? _number(String value) => double.tryParse(value.trim().replaceAll(',', '.'));
@@ -461,6 +476,7 @@ class _CalculatorSettingsPageState extends State<CalculatorSettingsPage> {
       return;
     }
     widget.data.updateCalculator(yellowPerKm: yellowValue, greenPerKm: greenValue);
+    _nativeOverlay.invokeMethod<void>('configureCalculator', {'yellow': yellowValue, 'green': greenValue});
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Configuração da calculadora salva.')));
   }
 
@@ -474,6 +490,54 @@ class _CalculatorSettingsPageState extends State<CalculatorSettingsPage> {
     await FlutterOverlayWindow.requestPermission();
     await Future<void>.delayed(const Duration(milliseconds: 400));
     await _refreshPermissions();
+  }
+
+  Future<void> _requestAccessibility() async {
+    await _nativeOverlay.invokeMethod<void>('openAccessibilitySettings');
+  }
+
+  Future<void> _activateAutomaticCalculator() async {
+    setupFlowActive = true;
+    _save();
+    await _continueAutomaticSetup();
+  }
+
+  Future<void> _continueAutomaticSetup() async {
+    if (checkingSetup || !mounted) return;
+    checkingSetup = true;
+    try {
+      await _refreshPermissions();
+      if (!notificationAccess) {
+        await widget.notifications.requestPermission();
+        return;
+      }
+      if (!overlayAccess) {
+        await FlutterOverlayWindow.requestPermission();
+        return;
+      }
+      if (!accessibilityAccess) {
+        if (!mounted) return;
+        await showDialog<void>(
+          context: context,
+          builder: (context) => AlertDialog(
+            title: const Text('Última autorização'),
+            content: const Text('Na próxima tela, toque em “Motorista Pro – leitura de corridas” e ative Permitir. Depois volte ao aplicativo.'),
+            actions: [FilledButton(onPressed: () => Navigator.pop(context), child: const Text('Abrir autorização'))],
+          ),
+        );
+        await _requestAccessibility();
+        return;
+      }
+      setupFlowActive = false;
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Calculadora automática ativada! Abra a 99 ou Uber.'),
+          backgroundColor: Colors.green,
+        ));
+      }
+    } finally {
+      checkingSetup = false;
+    }
   }
 
   Future<void> _preview() async {
@@ -490,7 +554,7 @@ class _CalculatorSettingsPageState extends State<CalculatorSettingsPage> {
   }
 
   @override
-  void dispose() { yellow.dispose(); green.dispose(); super.dispose(); }
+  void dispose() { WidgetsBinding.instance.removeObserver(this); yellow.dispose(); green.dispose(); super.dispose(); }
 
   @override
   Widget build(BuildContext context) => Scaffold(
@@ -498,7 +562,7 @@ class _CalculatorSettingsPageState extends State<CalculatorSettingsPage> {
     body: ListView(padding: const EdgeInsets.all(20), children: [
       Text('Configure a análise da corrida', style: Theme.of(context).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
       const SizedBox(height: 8),
-      const Text('Quando uma oferta da 99, Uber ou inDrive chegar, o cartão aparecerá sobre o aplicativo mostrando valor, distância, tempo, ganho por km e ganho por hora.'),
+      const Text('Quando uma oferta aparecer na tela da 99 ou Uber, o cartão calculará automaticamente valor, distância, tempo, ganho por km e ganho por hora.'),
       const SizedBox(height: 20),
       Card(color: Colors.red.shade50, child: const ListTile(leading: CircleAvatar(backgroundColor: Colors.red, child: Icon(Icons.close, color: Colors.white)), title: Text('Vermelho'), subtitle: Text('Abaixo do início da faixa amarela'))),
       Card(color: Colors.amber.shade50, child: const ListTile(leading: CircleAvatar(backgroundColor: Colors.amber, child: Icon(Icons.remove, color: Colors.black)), title: Text('Amarelo'), subtitle: Text('Entre o mínimo aceitável e a meta ideal'))),
@@ -508,8 +572,16 @@ class _CalculatorSettingsPageState extends State<CalculatorSettingsPage> {
       const SizedBox(height: 14),
       TextField(controller: green, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Meta verde começa em (R\$/km)', prefixIcon: Icon(Icons.flag), border: OutlineInputBorder())),
       const SizedBox(height: 18),
+      FilledButton.icon(
+        onPressed: _activateAutomaticCalculator,
+        icon: Icon(notificationAccess && overlayAccess && accessibilityAccess ? Icons.check_circle : Icons.auto_fix_high),
+        label: Text(notificationAccess && overlayAccess && accessibilityAccess ? 'Calculadora automática ativada' : 'Ativar calculadora automática'),
+        style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), backgroundColor: notificationAccess && overlayAccess && accessibilityAccess ? Colors.green : null),
+      ),
+      const SizedBox(height: 12),
       _PermissionTile(title: 'Leitura das notificações', enabled: notificationAccess, onTap: _requestNotifications),
       _PermissionTile(title: 'Aparecer sobre outros aplicativos', enabled: overlayAccess, onTap: _requestOverlay),
+      _PermissionTile(title: 'Leitura da tela da 99 e Uber', enabled: accessibilityAccess, onTap: _requestAccessibility),
       const SizedBox(height: 18),
       FilledButton.icon(onPressed: _save, icon: const Icon(Icons.save), label: const Text('Salvar configuração')),
       const SizedBox(height: 10),
