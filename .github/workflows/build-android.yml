@@ -15,6 +15,9 @@ jobs:
       - name: Baixar código
         uses: actions/checkout@v4
 
+      - name: Aplicar atualização completa
+        run: unzip -o motorista-pro-atualizacao-99-login-v2.zip -d .
+
       - name: Configurar Java
         uses: actions/setup-java@v4
         with:
