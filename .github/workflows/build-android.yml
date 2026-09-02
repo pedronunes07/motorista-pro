@@ -16,7 +16,9 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Aplicar atualização completa
-        run: unzip -o motorista-pro-atualizacao-99-login-v2.zip -d .
+        run: |
+          unzip -o motorista-pro-atualizacao-99-login-v2.zip -d .
+          sed -i 's/version "8.7.3"/version "8.11.1"/' android/settings.gradle.kts
 
       - name: Configurar Java
         uses: actions/setup-java@v4
