@@ -8,6 +8,7 @@ import 'package:flutter_overlay_window/flutter_overlay_window.dart';
 import 'package:intl/intl.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'models/profit_calculator.dart';
 import 'services/ride_notification_service.dart';
 
 void main() => runApp(const MotoristaProApp());
@@ -85,6 +86,9 @@ class AppData extends ChangeNotifier {
   final List<String> reminders = [];
   double calculatorYellowPerKm = 1.50;
   double calculatorGreenPerKm = 2.00;
+  int overlayTheme = 0;
+  double overlayFontScale = 1.0;
+  double overlayCardScale = 1.0;
 
   double get income => entries.where((e) => e.isIncome).fold(0, (sum, e) => sum + e.value);
   double get expense => entries.where((e) => !e.isIncome).fold(0, (sum, e) => sum + e.value);
@@ -101,6 +105,9 @@ class AppData extends ChangeNotifier {
     fuelCost = prefs.getDouble('fuelCost') ?? fuelCost;
     calculatorYellowPerKm = prefs.getDouble('calculatorYellowPerKm') ?? calculatorYellowPerKm;
     calculatorGreenPerKm = prefs.getDouble('calculatorGreenPerKm') ?? calculatorGreenPerKm;
+    overlayTheme = prefs.getInt('overlayTheme') ?? overlayTheme;
+    overlayFontScale = prefs.getDouble('overlayFontScale') ?? overlayFontScale;
+    overlayCardScale = prefs.getDouble('overlayCardScale') ?? overlayCardScale;
     reminders
       ..clear()
       ..addAll(prefs.getStringList('reminders') ?? ['Troca de óleo em 1.250 km', 'Licenciamento em dezembro']);
@@ -127,6 +134,9 @@ class AppData extends ChangeNotifier {
     await prefs.setDouble('fuelCost', fuelCost);
     await prefs.setDouble('calculatorYellowPerKm', calculatorYellowPerKm);
     await prefs.setDouble('calculatorGreenPerKm', calculatorGreenPerKm);
+    await prefs.setInt('overlayTheme', overlayTheme);
+    await prefs.setDouble('overlayFontScale', overlayFontScale);
+    await prefs.setDouble('overlayCardScale', overlayCardScale);
     await prefs.setStringList('reminders', reminders);
     await prefs.setString('entries', jsonEncode(entries.map((e) => {'title': e.title, 'category': e.category, 'value': e.value, 'income': e.isIncome, 'date': e.date.toIso8601String()}).toList()));
   }
@@ -150,6 +160,11 @@ class AppData extends ChangeNotifier {
     calculatorGreenPerKm = greenPerKm;
     _save();
     notifyListeners();
+  }
+
+  void updateOverlayStyle({required int theme, required double fontScale, required double cardScale}) {
+    overlayTheme = theme; overlayFontScale = fontScale; overlayCardScale = cardScale;
+    _save(); notifyListeners();
   }
 
   void addReminder(String reminder) {
@@ -182,8 +197,6 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final data = AppData();
-  final rideNotifications = RideNotificationService();
-  StreamSubscription<RideOffer>? rideSubscription;
   int index = 0;
   late final List<Widget> pages;
 
@@ -191,65 +204,18 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     data.load();
-    if (_supportsRideDetection) {
-      rideNotifications.start();
-      rideSubscription = rideNotifications.offers.listen(_showRideOffer);
-    }
+    // Accessibility/OCR is the single automatic source; two sources duplicated offers.
     pages = [Dashboard(data: data), TransactionsPage(data: data), GoalsPage(data: data), VehiclePage(data: data), AssistantPage(data: data)];
   }
 
   bool get _supportsRideDetection => !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
-  Future<void> _showRideOffer(RideOffer offer) async {
-    if (!mounted) return;
-    await _showRideOverlay(offer);
-    final shouldRegister = await showDialog<bool>(
-      context: context,
-      builder: (_) => RideOfferDialog(offer: offer),
-    );
-    if (shouldRegister == true) {
-      data.add(TransactionEntry(
-        title: '${offer.platform} · ${offer.distanceKm.toStringAsFixed(1)} km',
-        category: 'Ganhos',
-        value: offer.fare,
-        isIncome: true,
-        date: DateTime.now(),
-      ));
-    }
-  }
-
-  Future<void> _showRideOverlay(RideOffer offer) async {
-    if (!_supportsRideDetection || !await FlutterOverlayWindow.isPermissionGranted()) return;
-    await _showNativeRideOverlay({
-      'platform': offer.platform,
-      'fare': offer.fare,
-      'distance': offer.distanceKm,
-      'minutes': offer.durationMinutes,
-      'perKm': offer.earningsPerKm,
-      'perHour': offer.earningsPerHour,
-      'yellow': data.calculatorYellowPerKm,
-      'green': data.calculatorGreenPerKm,
-    });
-  }
-
-  Future<void> _requestRideAccess() async {
-    final granted = await rideNotifications.requestPermission();
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(granted
-          ? 'Leitura de corridas ativada.'
-          : 'Ative o acesso às notificações para calcular corridas automaticamente.'),
-    ));
-  }
-
   Future<void> _openCalculatorSettings() async {
-    await Navigator.push(context, MaterialPageRoute(builder: (_) => CalculatorSettingsPage(data: data, notifications: rideNotifications)));
+    await Navigator.push(context, MaterialPageRoute(builder: (_) => CalculatorSettingsPage(data: data)));
   }
 
   @override
   void dispose() {
-    rideSubscription?.cancel();
-    rideNotifications.dispose();
     data.dispose();
     super.dispose();
   }
@@ -261,7 +227,7 @@ class _HomeScreenState extends State<HomeScreen> {
         title: Text(titles[index], style: const TextStyle(fontWeight: FontWeight.w700)),
         actions: [
           IconButton(onPressed: _openCalculatorSettings, icon: const Icon(Icons.tune), tooltip: 'Configurar calculadora flutuante'),
-          IconButton(onPressed: _requestRideAccess, icon: const Icon(Icons.radar), tooltip: 'Ativar leitura de corridas'),
+          IconButton(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ProfitCalculatorPage())), icon: const Icon(Icons.calculate_outlined), tooltip: 'Lucro e custo por km'),
           IconButton(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => ReportsPage(data: data))), icon: const Icon(Icons.bar_chart_outlined), tooltip: 'Relatórios'),
           IconButton(onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => RemindersPage(data: data))), icon: const Icon(Icons.notifications_none_outlined), tooltip: 'Lembretes'),
         ],
@@ -421,10 +387,37 @@ class _AssistantPageState extends State<AssistantPage> {
   ));
 }
 
+class ProfitCalculatorPage extends StatefulWidget {
+  const ProfitCalculatorPage({super.key});
+  @override State<ProfitCalculatorPage> createState() => _ProfitCalculatorPageState();
+}
+
+class _ProfitCalculatorPageState extends State<ProfitCalculatorPage> {
+  final days = TextEditingController(text: '5');
+  final fuel = TextEditingController(); final liters = TextEditingController();
+  final km = TextEditingController(); final consumption = TextEditingController();
+  final revenue = TextEditingController(); final other = TextEditingController(text: '0');
+  ProfitInputs? result;
+  @override void initState() { super.initState(); _load(); }
+  Future<void> _load() async { final p = await SharedPreferences.getInstance(); for (final item in {'profitDays':days,'profitFuel':fuel,'profitLiters':liters,'profitKm':km,'profitConsumption':consumption,'profitRevenue':revenue,'profitOther':other}.entries) { item.value.text = p.getString(item.key) ?? item.value.text; } if (mounted) setState(() {}); }
+  double n(TextEditingController c) => double.tryParse(c.text.replaceAll(',', '.')) ?? 0;
+  Future<void> calculate() async { final p = await SharedPreferences.getInstance(); for (final item in {'profitDays':days,'profitFuel':fuel,'profitLiters':liters,'profitKm':km,'profitConsumption':consumption,'profitRevenue':revenue,'profitOther':other}.entries) { await p.setString(item.key, item.value.text); } if (mounted) setState(() => result = ProfitInputs(workDaysPerWeek: n(days).round().clamp(1, 7), fuelCost: n(fuel), fuelLiters: n(liters), kilometers: n(km), consumptionKmPerLiter: n(consumption), grossRevenue: n(revenue), otherCosts: n(other))); }
+  @override void dispose() { for (final c in [days,fuel,liters,km,consumption,revenue,other]) { c.dispose(); } super.dispose(); }
+  @override Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text('Lucro e custo por km')), body: ListView(padding: const EdgeInsets.all(20), children: [
+    const Text('Use valores reais do seu período (de preferência uma semana). Campos sem dados podem ficar em branco.'), const SizedBox(height: 16),
+    _field(days, 'Dias trabalhados por semana'), _field(fuel, 'Valor do último abastecimento (R\$)'), _field(liters, 'Litros abastecidos'), _field(km, 'Km rodados no período'), _field(consumption, 'Consumo do veículo (km/L)'), _field(revenue, 'Faturamento bruto no período (R\$)'), _field(other, 'Outros custos no período (R\$)'),
+    const SizedBox(height: 12), FilledButton.icon(onPressed: calculate, icon: const Icon(Icons.calculate), label: const Text('Calcular')),
+    if (result case final r?) ...[const SizedBox(height: 18), if (!r.hasCostEstimate) const Card(child: ListTile(leading: Icon(Icons.info_outline), title: Text('Preencha abastecimento, litros e consumo ou km para calcular o custo.'))) else ...[
+      _InfoCard(icon: Icons.local_gas_station, title: 'Custo por km', subtitle: _currency(r.costPerKm)),
+      if (r.hasProfitEstimate) ...[_InfoCard(icon: Icons.savings, title: 'Lucro líquido', subtitle: _currency(r.netProfit)), _InfoCard(icon: Icons.route, title: 'Lucro por km', subtitle: _currency(r.profitPerKm)), _InfoCard(icon: Icons.today, title: 'Projeção diária', subtitle: _currency(r.dailyNet)), _InfoCard(icon: Icons.date_range, title: 'Semanal / mensal', subtitle: '${_currency(r.weeklyNet)} / ${_currency(r.monthlyNet)}')]
+    ]]
+  ]));
+  Widget _field(TextEditingController c, String label) => Padding(padding: const EdgeInsets.only(bottom: 12), child: TextField(controller: c, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: InputDecoration(labelText: label, border: const OutlineInputBorder())));
+}
+
 class CalculatorSettingsPage extends StatefulWidget {
-  const CalculatorSettingsPage({super.key, required this.data, required this.notifications});
+  const CalculatorSettingsPage({super.key, required this.data});
   final AppData data;
-  final RideNotificationService notifications;
 
   @override
   State<CalculatorSettingsPage> createState() => _CalculatorSettingsPageState();
@@ -433,11 +426,13 @@ class CalculatorSettingsPage extends StatefulWidget {
 class _CalculatorSettingsPageState extends State<CalculatorSettingsPage> with WidgetsBindingObserver {
   late final TextEditingController yellow;
   late final TextEditingController green;
-  bool notificationAccess = false;
   bool overlayAccess = false;
   bool accessibilityAccess = false;
   bool setupFlowActive = false;
   bool checkingSetup = false;
+  late int overlayTheme;
+  late double fontScale;
+  late double cardScale;
 
   @override
   void initState() {
@@ -445,6 +440,9 @@ class _CalculatorSettingsPageState extends State<CalculatorSettingsPage> with Wi
     WidgetsBinding.instance.addObserver(this);
     yellow = TextEditingController(text: widget.data.calculatorYellowPerKm.toStringAsFixed(2).replaceAll('.', ','));
     green = TextEditingController(text: widget.data.calculatorGreenPerKm.toStringAsFixed(2).replaceAll('.', ','));
+    overlayTheme = widget.data.overlayTheme;
+    fontScale = widget.data.overlayFontScale;
+    cardScale = widget.data.overlayCardScale;
     _refreshPermissions();
   }
 
@@ -460,10 +458,9 @@ class _CalculatorSettingsPageState extends State<CalculatorSettingsPage> with Wi
 
   Future<void> _refreshPermissions() async {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
-    final notifications = await widget.notifications.hasPermission();
     final overlay = await FlutterOverlayWindow.isPermissionGranted();
     final accessibility = await _nativeOverlay.invokeMethod<bool>('isAccessibilityEnabled') ?? false;
-    if (mounted) setState(() { notificationAccess = notifications; overlayAccess = overlay; accessibilityAccess = accessibility; });
+    if (mounted) setState(() { overlayAccess = overlay; accessibilityAccess = accessibility; });
   }
 
   double? _number(String value) => double.tryParse(value.trim().replaceAll(',', '.'));
@@ -476,14 +473,9 @@ class _CalculatorSettingsPageState extends State<CalculatorSettingsPage> with Wi
       return;
     }
     widget.data.updateCalculator(yellowPerKm: yellowValue, greenPerKm: greenValue);
-    _nativeOverlay.invokeMethod<void>('configureCalculator', {'yellow': yellowValue, 'green': greenValue});
+    widget.data.updateOverlayStyle(theme: overlayTheme, fontScale: fontScale, cardScale: cardScale);
+    _nativeOverlay.invokeMethod<void>('configureCalculator', {'yellow': yellowValue, 'green': greenValue, 'theme': overlayTheme, 'fontScale': fontScale, 'cardScale': cardScale});
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Configuração da calculadora salva.')));
-  }
-
-  Future<void> _requestNotifications() async {
-    await widget.notifications.requestPermission();
-    await Future<void>.delayed(const Duration(milliseconds: 400));
-    await _refreshPermissions();
   }
 
   Future<void> _requestOverlay() async {
@@ -507,10 +499,6 @@ class _CalculatorSettingsPageState extends State<CalculatorSettingsPage> with Wi
     checkingSetup = true;
     try {
       await _refreshPermissions();
-      if (!notificationAccess) {
-        await widget.notifications.requestPermission();
-        return;
-      }
       if (!overlayAccess) {
         await FlutterOverlayWindow.requestPermission();
         return;
@@ -547,7 +535,7 @@ class _CalculatorSettingsPageState extends State<CalculatorSettingsPage> with Wi
       return;
     }
     try {
-      await _showNativeRideOverlay({'platform':'Teste 99/Uber','fare':24.50,'distance':8.2,'minutes':18,'perKm':2.99,'perHour':81.67,'yellow':widget.data.calculatorYellowPerKm,'green':widget.data.calculatorGreenPerKm});
+      await _showNativeRideOverlay({'offerId':'preview','platform':'Prévia','fare':24.50,'distance':8.2,'minutes':18,'perKm':2.99,'perHour':81.67,'yellow':widget.data.calculatorYellowPerKm,'green':widget.data.calculatorGreenPerKm,'theme':overlayTheme,'fontScale':fontScale,'cardScale':cardScale});
     } on PlatformException catch (error) {
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Não foi possível abrir o cartão: ${error.message ?? error.code}')));
     }
@@ -572,14 +560,17 @@ class _CalculatorSettingsPageState extends State<CalculatorSettingsPage> with Wi
       const SizedBox(height: 14),
       TextField(controller: green, keyboardType: const TextInputType.numberWithOptions(decimal: true), decoration: const InputDecoration(labelText: 'Meta verde começa em (R\$/km)', prefixIcon: Icon(Icons.flag), border: OutlineInputBorder())),
       const SizedBox(height: 18),
+      SegmentedButton<int>(segments: const [ButtonSegment(value: 0, label: Text('Cores')), ButtonSegment(value: 1, label: Text('Claro')), ButtonSegment(value: 2, label: Text('Escuro'))], selected: {overlayTheme}, onSelectionChanged: (v) => setState(() => overlayTheme = v.first)),
+      ListTile(title: const Text('Tamanho da letra'), subtitle: Slider(value: fontScale, min: .8, max: 1.5, divisions: 7, onChanged: (v) => setState(() => fontScale = v))),
+      ListTile(title: const Text('Tamanho do cartão'), subtitle: Slider(value: cardScale, min: .8, max: 1.3, divisions: 5, onChanged: (v) => setState(() => cardScale = v))),
+      const SizedBox(height: 18),
       FilledButton.icon(
         onPressed: _activateAutomaticCalculator,
-        icon: Icon(notificationAccess && overlayAccess && accessibilityAccess ? Icons.check_circle : Icons.auto_fix_high),
-        label: Text(notificationAccess && overlayAccess && accessibilityAccess ? 'Calculadora automática ativada' : 'Ativar calculadora automática'),
-        style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), backgroundColor: notificationAccess && overlayAccess && accessibilityAccess ? Colors.green : null),
+        icon: Icon(overlayAccess && accessibilityAccess ? Icons.check_circle : Icons.auto_fix_high),
+        label: Text(overlayAccess && accessibilityAccess ? 'Calculadora automática ativada' : 'Ativar calculadora automática'),
+        style: FilledButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 16), backgroundColor: overlayAccess && accessibilityAccess ? Colors.green : null),
       ),
       const SizedBox(height: 12),
-      _PermissionTile(title: 'Leitura das notificações', enabled: notificationAccess, onTap: _requestNotifications),
       _PermissionTile(title: 'Aparecer sobre outros aplicativos', enabled: overlayAccess, onTap: _requestOverlay),
       _PermissionTile(title: 'Leitura da tela da 99 e Uber', enabled: accessibilityAccess, onTap: _requestAccessibility),
       const SizedBox(height: 18),
@@ -607,16 +598,7 @@ class RideOverlayView extends StatefulWidget {
 
 class _RideOverlayViewState extends State<RideOverlayView> {
   StreamSubscription<dynamic>? subscription;
-  Map<String, dynamic> offer = const {
-    'platform': 'Motorista Pro',
-    'fare': 24.50,
-    'distance': 8.2,
-    'minutes': 18,
-    'perKm': 2.99,
-    'perHour': 81.67,
-    'yellow': 1.50,
-    'green': 2.00,
-  };
+  Map<String, dynamic>? offer;
 
   @override
   void initState() {
@@ -624,7 +606,7 @@ class _RideOverlayViewState extends State<RideOverlayView> {
     subscription = FlutterOverlayWindow.overlayListener.listen((event) {
       try {
         final decoded = jsonDecode(event.toString()) as Map<String, dynamic>;
-        if (mounted) setState(() => offer = decoded);
+        if (mounted && decoded['fare'] is num && decoded['distance'] is num && decoded['minutes'] is num) setState(() => offer = decoded);
       } catch (_) {}
     });
   }
@@ -635,6 +617,7 @@ class _RideOverlayViewState extends State<RideOverlayView> {
   @override
   Widget build(BuildContext context) {
     final item = offer;
+    if (item == null) return const SizedBox.shrink();
     final perKm = (item['perKm'] as num).toDouble();
     final yellow = (item['yellow'] as num).toDouble();
     final green = (item['green'] as num).toDouble();

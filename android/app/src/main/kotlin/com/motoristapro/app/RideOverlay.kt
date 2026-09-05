@@ -19,20 +19,27 @@ import java.util.Locale
 
 object RideOverlay {
     private var overlayView: View? = null
+    private var generation = 0L
     private val handler = Handler(Looper.getMainLooper())
 
     fun show(context: Context, data: Map<String, Any?>) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !Settings.canDrawOverlays(context)) return
         handler.post {
             remove(context)
+            val currentGeneration = ++generation
             val perKm = number(data["perKm"])
             val yellow = number(data["yellow"], 1.5)
             val green = number(data["green"], 2.0)
-            val background = when {
+            val theme = number(data["theme"]).toInt()
+            val fontScale = number(data["fontScale"], 1.0).toFloat().coerceIn(.8f, 1.5f)
+            val cardScale = number(data["cardScale"], 1.0).coerceIn(.8, 1.3)
+            val metricColor = when {
                 perKm >= green -> Color.rgb(22, 128, 60)
                 perKm >= yellow -> Color.rgb(244, 180, 0)
                 else -> Color.rgb(198, 40, 40)
             }
+            val background = when (theme) { 1 -> Color.WHITE; 2 -> Color.rgb(28, 28, 30); else -> metricColor }
+            val foreground = if (theme == 1) Color.BLACK else Color.WHITE
             val status = when {
                 perKm >= green -> "ACIMA DA META"
                 perKm >= yellow -> "FAIXA INTERMEDIÁRIA"
@@ -40,11 +47,11 @@ object RideOverlay {
             }
             val box = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
-                setPadding(dp(context, 18), dp(context, 12), dp(context, 18), dp(context, 12))
+                setPadding(dp(context, (18 * cardScale).toInt()), dp(context, (12 * cardScale).toInt()), dp(context, (18 * cardScale).toInt()), dp(context, (12 * cardScale).toInt()))
                 this.background = GradientDrawable().apply {
                     setColor(background)
                     cornerRadius = dp(context, 18).toFloat()
-                    setStroke(dp(context, 3), Color.WHITE)
+                    setStroke(dp(context, 3), metricColor)
                 }
                 elevation = dp(context, 10).toFloat()
             }
@@ -52,9 +59,9 @@ object RideOverlay {
             val distance = number(data["distance"])
             val minutes = number(data["minutes"]).toInt()
             val perHour = number(data["perHour"])
-            box.addView(label(context, "$platform · $status", 14f, true))
-            box.addView(label(context, "${money(number(data["fare"]))}  •  ${money(perKm)}/km", 24f, true))
-            box.addView(label(context, "$minutes min  •  ${format(distance)} km  •  ${money(perHour)}/h", 15f, true))
+            box.addView(label(context, "$platform · $status", 14f * fontScale, true, foreground))
+            box.addView(label(context, "${money(number(data["fare"]))}  •  ${money(perKm)}/km", 24f * fontScale, true, foreground))
+            box.addView(label(context, "$minutes min  •  ${format(distance)} km  •  ${money(perHour)}/h", 15f * fontScale, true, foreground))
             box.setOnClickListener { remove(context) }
 
             val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O)
@@ -73,7 +80,7 @@ object RideOverlay {
             try {
                 (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager).addView(box, params)
                 overlayView = box
-                handler.postDelayed({ remove(context) }, 14000)
+                handler.postDelayed({ if (generation == currentGeneration) remove(context) }, 14000)
             } catch (_: Exception) { }
         }
     }
@@ -83,12 +90,13 @@ object RideOverlay {
             try { (context.getSystemService(Context.WINDOW_SERVICE) as WindowManager).removeView(it) } catch (_: Exception) { }
         }
         overlayView = null
+        generation++
     }
 
-    private fun label(context: Context, value: String, size: Float, bold: Boolean) = TextView(context).apply {
+    private fun label(context: Context, value: String, size: Float, bold: Boolean, color: Int) = TextView(context).apply {
         text = value
         textSize = size
-        setTextColor(Color.WHITE)
+        setTextColor(color)
         if (bold) setTypeface(typeface, Typeface.BOLD)
         setPadding(0, dp(context, 2), 0, dp(context, 2))
     }

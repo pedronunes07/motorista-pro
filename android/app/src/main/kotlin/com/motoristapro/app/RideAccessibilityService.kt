@@ -31,6 +31,7 @@ class RideAccessibilityService : AccessibilityService() {
         val platform = when {
             packageName.contains("uber") -> "Uber"
             packageName.contains("taxis99") || packageName.contains("99") || packageName.contains("didi") -> "99"
+            packageName.contains("indriver") || packageName.contains("indrive") -> "inDrive"
             else -> return
         }
         val root = rootInActiveWindow ?: event.source ?: return
@@ -58,7 +59,8 @@ class RideAccessibilityService : AccessibilityService() {
                 if (bitmap == null) { scanning = false; return }
                 recognizer.process(InputImage.fromBitmap(bitmap, 0))
                     .addOnSuccessListener { recognized ->
-                        ScreenOfferParser.parse(recognized.text)?.let { showOffer(platform, it) }
+                        val offer = ScreenOfferParser.parse(recognized.text)
+                        if (offer == null) RideOverlay.remove(this) else showOffer(platform, offer)
                     }
                     .addOnCompleteListener { bitmap.recycle(); scanning = false }
             }
@@ -69,19 +71,23 @@ class RideAccessibilityService : AccessibilityService() {
     private fun showOffer(platform: String, offer: ScreenOffer) {
         val signature = "$platform:${offer.fare}:${offer.distance}:${offer.minutes}"
         val now = System.currentTimeMillis()
-        if (signature == lastSignature && now - lastShownAt < 12000) return
+        if (signature == lastSignature && now - lastShownAt < 30000) return
         lastSignature = signature
         lastShownAt = now
         val preferences = getSharedPreferences("ride_calculator", MODE_PRIVATE)
         RideOverlay.show(this, mapOf(
             "platform" to platform,
+            "offerId" to signature,
             "fare" to offer.fare,
             "distance" to offer.distance,
             "minutes" to offer.minutes,
             "perKm" to offer.fare / offer.distance,
             "perHour" to offer.fare * 60.0 / offer.minutes,
             "yellow" to preferences.getFloat("yellow", 1.5f).toDouble(),
-            "green" to preferences.getFloat("green", 2.0f).toDouble()
+            "green" to preferences.getFloat("green", 2.0f).toDouble(),
+            "theme" to preferences.getInt("theme", 0),
+            "fontScale" to preferences.getFloat("fontScale", 1.0f).toDouble(),
+            "cardScale" to preferences.getFloat("cardScale", 1.0f).toDouble()
         ))
     }
 
@@ -108,16 +114,21 @@ private object ScreenOfferParser {
     private val hourMinute = Regex("([0-9]+)\\s*h(?:ora)?s?\\s*([0-9]+)\\s*m", RegexOption.IGNORE_CASE)
 
     fun parse(text: String): ScreenOffer? {
-        val fare = money.findAll(text).mapNotNull { decimal(it.groupValues[1]) }.filter { it in 3.0..999.0 }.maxOrNull() ?: return null
+        val fares = money.findAll(text).mapNotNull { decimal(it.groupValues[1]) }.filter { it in 3.0..999.0 }.distinct().toList()
+        // Ambiguous screens are ignored: choosing the largest number would invent which value is the fare.
+        if (fares.size != 1) return null
+        val fare = fares.single()
         val distances = km.findAll(text).mapNotNull { decimal(it.groupValues[1]) }.filter { it in 0.1..500.0 }.toList()
         if (distances.isEmpty()) return null
-        // A oferta pode exibir distância até o passageiro e distância da viagem. Somamos ambas.
-        val distance = distances.take(2).sum()
+        // Do not guess whether multiple distances mean pickup + trip. Only accept an unambiguous value.
+        if (distances.distinct().size != 1) return null
+        val distance = distances.single()
         val durationValues = min.findAll(text).mapNotNull { it.groupValues[1].toIntOrNull() }.filter { it in 1..600 }.toList()
         val hourValue = hourMinute.find(text)?.let {
             (it.groupValues[1].toIntOrNull() ?: 0) * 60 + (it.groupValues[2].toIntOrNull() ?: 0)
         }
-        val minutes = hourValue?.takeIf { it > 0 } ?: durationValues.take(2).sum().takeIf { it > 0 } ?: return null
+        if (hourValue == null && durationValues.distinct().size != 1) return null
+        val minutes = hourValue?.takeIf { it > 0 } ?: durationValues.singleOrNull() ?: return null
         return ScreenOffer(fare, distance, minutes)
     }
 
