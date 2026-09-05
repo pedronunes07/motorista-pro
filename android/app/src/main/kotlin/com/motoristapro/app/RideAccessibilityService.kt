@@ -60,7 +60,7 @@ class RideAccessibilityService : AccessibilityService() {
                 recognizer.process(InputImage.fromBitmap(bitmap, 0))
                     .addOnSuccessListener { recognized ->
                         val offer = ScreenOfferParser.parse(recognized.text)
-                        if (offer == null) RideOverlay.remove(this) else showOffer(platform, offer)
+                        if (offer == null) RideOverlay.remove(this@RideAccessibilityService) else showOffer(platform, offer)
                     }
                     .addOnCompleteListener { bitmap.recycle(); scanning = false }
             }
