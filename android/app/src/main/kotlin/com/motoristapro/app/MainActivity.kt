@@ -28,6 +28,9 @@ class MainActivity : FlutterActivity() {
                         getSharedPreferences("ride_calculator", MODE_PRIVATE).edit()
                             .putFloat("yellow", (data["yellow"] as? Number)?.toFloat() ?: 1.5f)
                             .putFloat("green", (data["green"] as? Number)?.toFloat() ?: 2.0f)
+                            .putInt("theme", (data["theme"] as? Number)?.toInt() ?: 0)
+                            .putFloat("fontScale", (data["fontScale"] as? Number)?.toFloat() ?: 1.0f)
+                            .putFloat("cardScale", (data["cardScale"] as? Number)?.toFloat() ?: 1.0f)
                             .apply()
                         result.success(null)
                     }

@@ -48,5 +48,15 @@ void main() {
 
       expect(offer, isNull);
     });
+
+    test('não escolhe valores quando a tela é ambígua', () {
+      expect(RideOfferParser.parse(packageName: 'com.ubercab.driver', title: 'Nova corrida', content: r'R$ 20,00 ou R$ 25,00 · 5 km · 10 min'), isNull);
+      expect(RideOfferParser.parse(packageName: 'com.taxis99', title: 'Nova corrida', content: r'R$ 20,00 · 2 km até buscar · 7 km viagem · 15 min'), isNull);
+    });
+
+    test('reconhece pacote da 99 e inDrive sem inventar campos', () {
+      expect(RideOfferParser.parse(packageName: 'com.taxis99', title: 'Solicitação', content: r'R$ 30,00 · 10 km · 20 min')?.platform, '99');
+      expect(RideOfferParser.parse(packageName: 'sinet.startup.inDriver', title: 'Nova viagem', content: r'R$ 15,00 · 4 km · 9 min')?.platform, 'inDrive');
+    });
   });
 }
