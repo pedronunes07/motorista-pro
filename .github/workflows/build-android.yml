@@ -16,7 +16,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Aplicar versão completa mais recente
-        run: unzip -o motorista-pro-atualizacao-corridas-v17.zip -d .
+        run: unzip -o motorista-pro-atualizacao-corridas-v18.zip -d .
 
       - name: Configurar Java
         uses: actions/setup-java@v4
