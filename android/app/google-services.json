@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "84195666924",
+    "project_id": "motorista-pro-bea15",
+    "storage_bucket": "motorista-pro-bea15.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:84195666924:android:8a4de3e13416a9b1942ec9",
+        "android_client_info": {
+          "package_name": "com.motoristapro.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBslCSDfobzn-1Qdzet49HV-VcxsUTmXeU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

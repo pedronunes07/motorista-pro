@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Set only after a reviewed provider and backend have been deployed. Never place an API key here. -->
+    <string name="route_risk_endpoint" translatable="false"></string>
+</resources>
