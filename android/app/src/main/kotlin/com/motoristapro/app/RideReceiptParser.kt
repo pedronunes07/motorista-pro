@@ -48,8 +48,9 @@ object RideReceiptParser {
         }
         val reference = Regex("(?:id|codigo|numero) (?:da )?(?:corrida|viagem)\\s*[:#-]?\\s*([a-z0-9-]{4,64})")
             .find(normalized)?.groupValues?.get(1)
-        // A heading alone can be an animation frame. Wait for at least one receipt field.
-        if (fare == null && totals.isEmpty() && preferred.isEmpty() && kms.isEmpty() && route.pickup == null && route.destination == null && reference == null) return null
+        // Explicit finalization can arrive before the receipt fields. Keep a pending
+        // record and enrich it on the next frame instead of losing the completed ride.
+        if (!finished.containsMatchIn(normalized) && fare == null && totals.isEmpty() && preferred.isEmpty() && kms.isEmpty() && route.pickup == null && route.destination == null && reference == null) return null
         return RideReceipt(fare, kms.distinct().singleOrNull(), route, reference)
     }
 

@@ -10,11 +10,11 @@ fun main() {
         for ((text,value) in listOf("26.25" to 26.25,"4,60" to 4.60,"1.234,56" to 1234.56,"2,50" to 2.5,"0,00" to 0.0)) {
             expect(close(RideReceiptParser.parse("Corrida finalizada\nValor recebido: R$ $text")?.fare,value),text)
         }
-        expect(RideReceiptParser.parse("Corrida finalizada\nValor recebido: R$ 26.250") == null,"ambiguous thousands must not truncate")
+        expect(RideReceiptParser.parse("Corrida finalizada\nValor recebido: R$ 26.250")!!.fare == null,"ambiguous thousands must not truncate")
     }
     test("cash collection, wallet and cancelled rides are not receipts") {
         for (text in listOf("Total recebido R$ 200,00","Você ganhou R$ 200,00","Valor líquido R$ 100,00","Corrida cancelada\nValor recebido R$ 5,00","Corrida encerrada\nCobrar do passageiro R$ 18,50")) expect(RideReceiptParser.parse(text)==null,text)
-        expect(RideReceiptParser.parse("Corrida finalizada\nCobrar do passageiro R$ 18,50")==null,"cash is not net fare")
+        expect(RideReceiptParser.parse("Corrida finalizada\nCobrar do passageiro R$ 18,50")!!.fare==null,"cash is not net fare")
     }
     test("net receipt wins over gross, fees and change") {
         val receipt = RideReceiptParser.parse("Resumo da viagem\nValor da viagem R$ 30,00\nValor líquido\nR$ 26.25\nTaxa R$ 3,75\nTroco R$ 9,00")!!
@@ -134,6 +134,20 @@ fun main() {
         ledger.noReceipt("99",7000)
         ledger.receipt("99",RideReceipt(18.75,null,RideRoute()),10000)
         expect(ledger.records.size==2,"missed active screen must not merge receipts")
+    }
+    test("explicit completion survives a frame with no readable amounts") {
+        val first=RideReceiptParser.parse("Corrida finalizada")!!
+        expect(first.fare==null && first.distance==null,"missing fields")
+        val ledger=RideLedger(); val pending=ledger.receipt("99",first,1000)
+        val final=ledger.receipt("99",RideReceiptParser.parse("Corrida finalizada\nValor recebido R$ 26.25")!!,2000)
+        expect(pending.id==final.id && close(final.value,26.25),"enrich pending receipt")
+    }
+    test("an unread accepted card cannot use another visible candidate's route") {
+        val ledger=RideLedger()
+        ledger.offer("99",ScreenOffer(30.0,12.0,20,null,RideRoute("Rua errada, 1","Rua errada, 2")),1000)
+        ledger.acceptUnknown("99",1500)
+        val final=ledger.receipt("99",RideReceipt(26.25,null,RideRoute()),2000)
+        expect(final.pickup==null && final.destination==null,"wrong candidate route")
     }
     println("$cases native behavioral tests passed")
 }
