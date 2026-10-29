@@ -15,4 +15,6 @@ Não foi disponibilizada uma API/base nacional de áreas de risco. A consulta pe
 
 Sem identificação de viagem ou transição observável entre dois comprovantes idênticos, a leitura de tela não consegue distinguir com certeza se houve uma nova corrida; evita duplicar. O app precisa enxergar o comprovante final. Endereços não lidos não podem ser reconstruídos e não há traçado GPS.
 
+Para salvar pelo OCR, a acessibilidade deve confirmar que a janela pertence ao aplicativo de corrida. Reconhecer o nome “99” ou “Uber” numa foto aberta em outro aplicativo não autoriza gravar receita no histórico.
+
 Os testes cobrem leitura, soma, ciclo de ofertas/conclusões, confirmação de salvamento, revisão manual e validação das fontes de alerta. É necessário validar no aparelho os layouts reais da 99/Uber/inDrive, especialmente comprovantes que não mostram rótulos, eventos ou endereços completos.

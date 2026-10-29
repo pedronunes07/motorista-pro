@@ -141,10 +141,13 @@ class ScreenCaptureService : Service() {
                                 if (foreground == null || foreground != framePlatform || (detectedPlatform != null && foreground != detectedPlatform)) return@addOnSuccessListener
                                 foreground
                             } else detectedPlatform ?: return@addOnSuccessListener
-                            if (ScreenOfferParser.isActiveRide(result.text)) {
+                            if (accessibility != null && ScreenOfferParser.isActiveRide(result.text)) {
                                 CompletedRideStore.confirmRideStarted(this, platform)
                             }
-                            CompletedRideStore.observe(this, platform, result.text)
+                            // Text recognition alone cannot distinguish a live receipt from
+                            // a receipt photo in a gallery/chat. Financial writes require
+                            // a provider window verified by accessibility.
+                            if (accessibility != null) CompletedRideStore.observe(this, platform, result.text)
                             // Analise primeiro apenas a região onde a 99 desenha
                             // os cartões. Isso evita misturar saldo, promoções e
                             // informações do mapa com o valor real da oferta.
