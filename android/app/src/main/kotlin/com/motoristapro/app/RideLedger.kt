@@ -26,6 +26,7 @@ class RideLedger(
     fun offer(platform: String, offer: ScreenOffer, now: Long) {
         val key = "${offer.fare}|${offer.distance}|${offer.minutes}|${offer.route}"
         val previous = candidates[platform]
+        if (previous?.key == key && now - previous.at in 0..15_000L) return
         candidates[platform] = TripContext(previous?.takeIf { it.key == key }?.id ?: UUID.randomUUID().toString(), platform, offer.route, now, key)
     }
 
@@ -89,7 +90,7 @@ class RideLedger(
         val updated = if (previous != null && record != previous) record.copy(revision = previous.revision + 1) else record
         if (previous != null) records[records.indexOf(previous)] = updated else records.add(updated)
         receiptOnScreen[platform] = updated.id
-        receiptSeenAt[platform] = now
+        if (now - (receiptSeenAt[platform] ?: 0L) >= 1000L) receiptSeenAt[platform] = now
         // A queued offer only becomes active after an observed start, never on another receipt frame.
         if (context != null && (previous == null || previous.id == context.id)) {
             active.remove(platform)

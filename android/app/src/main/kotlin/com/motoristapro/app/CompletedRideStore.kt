@@ -7,6 +7,7 @@ import org.json.JSONObject
 object CompletedRideStore {
     private const val PREFS = "completed_rides_native"
     private const val STATE = "ledger_v27"
+    private var lastCommitted: String? = null
     private fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     private fun nullableText(item: JSONObject, key: String): String? = item.optString(key).takeIf { it.isNotBlank() && it != "null" }
@@ -57,7 +58,12 @@ object CompletedRideStore {
             .put("active",contexts(ledger.active)).put("next",contexts(ledger.next)).put("candidates",contexts(ledger.candidates))
             .put("screen",JSONObject(ledger.receiptOnScreen.toMap()))
             .put("seen",JSONObject(ledger.receiptSeenAt.toMap()))
-        check(prefs(context).edit().putString(STATE,json.toString()).commit()) { "Não foi possível gravar a corrida." }
+        val encoded = json.toString()
+        // Accessibility can fire dozens of events a second. Avoid synchronous disk
+        // writes when the trip/queue has not changed, which could stall detection.
+        if (lastCommitted == encoded) return
+        check(prefs(context).edit().putString(STATE,encoded).commit()) { "Não foi possível gravar a corrida." }
+        lastCommitted = encoded
     }
 
     private inline fun update(context: Context, change: (RideLedger) -> Unit): Boolean = try {
